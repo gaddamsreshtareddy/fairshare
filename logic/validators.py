@@ -6,6 +6,7 @@ cleaned value, or raises ValidationError with a message safe to show the user.
 
 # Currencies FairShare supports (from the planning document).
 SUPPORTED_CURRENCIES = ("INR", "USD", "EUR", "GBP", "AED")
+CATEGORIES = ("Food", "Hotel", "Transport", "Entertainment", "Shopping", "Other")
 
 MAX_GROUP_NAME_LENGTH = 50
 MAX_MEMBER_NAME_LENGTH = 40

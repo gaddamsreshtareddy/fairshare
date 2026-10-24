@@ -7,8 +7,7 @@ Rules for this file:
 - Functions return model objects (Group, Member, ...), never raw rows.
 """
 
-from data.models import Group, Member
-
+from data.models import Expense, Group, Item, Member, PayerShare, Split
 
 # ---------------------------------------------------------------------------
 # Groups
@@ -139,3 +138,119 @@ def delete_member(conn, member_id: int) -> bool:
     cur = conn.execute("DELETE FROM members WHERE id = ?", (member_id,))
     conn.commit()
     return cur.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Expenses
+# ---------------------------------------------------------------------------
+def create_expense(conn, expense: Expense) -> Expense:
+    """Save an expense with its payers, splits and items in ONE transaction.
+
+    Either everything is saved or nothing is (atomicity). On any error the
+    changes are rolled back and the error is raised again.
+    """
+    try:
+        cur = conn.execute(
+            """INSERT INTO expenses
+               (group_id, title, category, expense_date, currency,
+                original_amount, exchange_rate, base_amount, split_method)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                expense.group_id, expense.title, expense.category,
+                expense.expense_date, expense.currency,
+                expense.original_amount, expense.exchange_rate,
+                expense.base_amount, expense.split_method,
+            ),
+        )
+        expense_id = cur.lastrowid
+
+        for payer in expense.payers:
+            conn.execute(
+                "INSERT INTO expense_payers (expense_id, member_id, amount_paid) "
+                "VALUES (?, ?, ?)",
+                (expense_id, payer.member_id, payer.amount_paid),
+            )
+
+        for split in expense.splits:
+            conn.execute(
+                "INSERT INTO expense_splits "
+                "(expense_id, member_id, share_amount, percentage) "
+                "VALUES (?, ?, ?, ?)",
+                (expense_id, split.member_id, split.share_amount, split.percentage),
+            )
+
+        for item in expense.items:
+            item_cur = conn.execute(
+                "INSERT INTO items (expense_id, name, amount) VALUES (?, ?, ?)",
+                (expense_id, item.name, item.amount),
+            )
+            for member_id in item.consumer_ids:
+                conn.execute(
+                    "INSERT INTO item_consumers (item_id, member_id) VALUES (?, ?)",
+                    (item_cur.lastrowid, member_id),
+                )
+
+        conn.commit()  # only now does anything become permanent
+    except Exception:
+        conn.rollback()  # undo every insert above
+        raise            # let the caller know the save failed
+
+    return get_expense(conn, expense_id)
+
+
+def get_expense(conn, expense_id: int) -> Expense | None:
+    """Return one expense with its payers, splits and items, or None."""
+    row = conn.execute(
+        "SELECT * FROM expenses WHERE id = ?", (expense_id,)
+    ).fetchone()
+    if row is None:
+        return None
+
+    expense = Expense.from_row(row)
+
+    expense.payers = [
+        PayerShare.from_row(r)
+        for r in conn.execute(
+            "SELECT * FROM expense_payers WHERE expense_id = ? ORDER BY id",
+            (expense_id,),
+        )
+    ]
+    expense.splits = [
+        Split.from_row(r)
+        for r in conn.execute(
+            "SELECT * FROM expense_splits WHERE expense_id = ? ORDER BY id",
+            (expense_id,),
+        )
+    ]
+
+    items = [
+        Item.from_row(r)
+        for r in conn.execute(
+            "SELECT * FROM items WHERE expense_id = ? ORDER BY id", (expense_id,)
+        )
+    ]
+    for item in items:
+        item.consumer_ids = [
+            r["member_id"]
+            for r in conn.execute(
+                "SELECT member_id FROM item_consumers WHERE item_id = ? "
+                "ORDER BY member_id",
+                (item.id,),
+            )
+        ]
+    expense.items = items
+
+    return expense
+
+
+def list_expenses(conn, group_id: int) -> list[Expense]:
+    """All expenses of a group, newest date first (ties: newest id first)."""
+    ids = [
+        r["id"]
+        for r in conn.execute(
+            "SELECT id FROM expenses WHERE group_id = ? "
+            "ORDER BY expense_date DESC, id DESC",
+            (group_id,),
+        )
+    ]
+    return [get_expense(conn, expense_id) for expense_id in ids]
