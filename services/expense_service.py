@@ -6,7 +6,7 @@ saves it through the repository. No SQL and no split math lives here.
 
 from datetime import date
 from decimal import Decimal
-
+from logic.balances import calculate_balances
 from data import repositories as repo
 from data.models import Expense, Item, PayerShare, Split
 from logic.splitting import (
@@ -109,3 +109,10 @@ def get_expense(conn, expense_id):
 
 def list_expenses(conn, group_id):
     return repo.list_expenses(conn, group_id)
+
+def get_balances(conn, group_id):
+    """Return {member_id: {"paid", "owed", "net"}} for the whole group."""
+    group_service.get_group(conn, group_id)  # raises if the group is missing
+    expenses = repo.list_expenses(conn, group_id)
+    members = repo.list_members(conn, group_id)
+    return calculate_balances(expenses, [m.id for m in members])
