@@ -60,3 +60,29 @@ def validate_currency(code) -> str:
             f"Currency '{cleaned}' is not supported. Choose one of: {supported}."
         )
     return cleaned
+
+
+MAX_AMOUNT = 100_000_000_00  # 10 crore rupees, in paise
+
+
+def validate_amount(total, label="Amount"):
+    """Total must be a whole number of paise, above 0 and not absurdly large."""
+    if isinstance(total, bool) or not isinstance(total, int):
+        raise ValidationError(f"{label} must be a whole number of paise.")
+    if total <= 0:
+        raise ValidationError(f"{label} must be greater than zero.")
+    if total > MAX_AMOUNT:
+        raise ValidationError(f"{label} is too large.")
+    return total
+
+
+def validate_expense_date(value):
+    """Accept dates from 2000-01-01 up to one year from today."""
+    from datetime import date, timedelta
+    try:
+        parsed = date.fromisoformat(str(value))
+    except ValueError:
+        raise ValidationError("Date is not valid.") from None
+    if parsed < date(2000, 1, 1) or parsed > date.today() + timedelta(days=365):
+        raise ValidationError("Date must be between 2000 and one year from today.")
+    return parsed.isoformat()

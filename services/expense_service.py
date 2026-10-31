@@ -16,7 +16,13 @@ from logic.splitting import (
     percentage_split,
     validate_payers,
 )
-from logic.validators import CATEGORIES, ValidationError, clean_text
+from logic.validators import (
+    CATEGORIES,
+    ValidationError,
+    clean_text,
+    validate_amount,
+    validate_expense_date,
+)
 from services import group_service
 
 
@@ -47,13 +53,7 @@ def add_expense(conn, group_id, title, category, expense_date, payers,
         raise ValidationError("Title is required.")
     if category not in CATEGORIES:
         raise ValidationError(f"Category must be one of: {', '.join(CATEGORIES)}.")
-    if isinstance(expense_date, date):
-        expense_date = expense_date.isoformat()
-    try:
-        date.fromisoformat(str(expense_date))
-    except ValueError:
-        raise ValidationError("Date is not valid.") from None
-
+    expense_date = validate_expense_date(expense_date)
     percent_by_member = {}
     item_models = []
 
@@ -76,6 +76,7 @@ def add_expense(conn, group_id, title, category, expense_date, payers,
     else:
         raise ValidationError("Choose a split method.")
 
+        validate_amount(total, "Total")
     payer_amounts = validate_payers(total, payers)
     _check_members_in_group(conn, group_id, list(payer_amounts) + list(split_amounts))
 
@@ -126,12 +127,7 @@ def update_expense_details(conn, expense_id, title, category, expense_date):
         raise ValidationError("Title is required.")
     if category not in CATEGORIES:
         raise ValidationError(f"Category must be one of: {', '.join(CATEGORIES)}.")
-    if isinstance(expense_date, date):
-        expense_date = expense_date.isoformat()
-    try:
-        date.fromisoformat(str(expense_date))
-    except ValueError:
-        raise ValidationError("Date is not valid.") from None
+    expense_date = validate_expense_date(expense_date)
     return repo.update_expense_details(conn, expense_id, clean_title, category,
                                        str(expense_date))
 

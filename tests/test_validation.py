@@ -9,6 +9,8 @@ from logic.validators import (
     validate_currency,
     validate_group_name,
     validate_member_name,
+    validate_amount, 
+    validate_expense_date
 )
 
 
@@ -96,3 +98,22 @@ def test_unsupported_currency_message_lists_the_choices():
 # ---------------------------------------------------------------------------
 def test_validation_error_is_a_value_error():
     assert issubclass(ValidationError, ValueError)
+
+
+from datetime import date, timedelta
+
+
+def test_amount_rules():
+    assert validate_amount(100) == 100
+    for bad in (0, -5, 12.5, "100", True, 100_000_000_01):
+        with pytest.raises(ValidationError):
+            validate_amount(bad)
+
+
+def test_date_rules():
+    assert validate_expense_date("2025-01-31") == "2025-01-31"
+    assert validate_expense_date(date.today()) == date.today().isoformat()
+    for bad in ("2025-13-45", "1999-12-31", "abc",
+                (date.today() + timedelta(days=400)).isoformat()):
+        with pytest.raises(ValidationError):
+            validate_expense_date(bad)
