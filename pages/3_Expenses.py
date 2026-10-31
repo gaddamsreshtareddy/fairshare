@@ -1,5 +1,4 @@
-"""FairShare: Expense History page."""
-
+"""FairShare: Expense History page (list, details, edit, delete)."""
 
 from datetime import date
 
@@ -35,12 +34,21 @@ col1, col2 = st.columns(2)
 col1.metric("Expenses", len(expenses))
 col2.metric("Total spending", format_money(sum(e.base_amount for e in expenses), currency))
 
+
+def original_text(e):
+    """Show the original amount and rate for foreign-currency expenses."""
+    if e.currency == currency:
+        return ""
+    return f"{format_money(e.original_amount, e.currency)} @ {e.exchange_rate:g}"
+
+
 st.dataframe(
     [
         {
             "Date": e.expense_date,
             "Expense": e.title,
             "Amount": format_money(e.base_amount, currency),
+            "Original": original_text(e),
             "Category": e.category,
             "Split": METHODS[e.split_method],
             "Paid by": ", ".join(names[p.member_id] for p in e.payers),
@@ -68,6 +76,9 @@ exp = by_id[chosen_id]
 
 st.markdown(f"**{exp.title}**: {format_money(exp.base_amount, currency)} "
             f"({exp.category}, {METHODS[exp.split_method]} split)")
+if exp.currency != currency:
+    st.caption(f"Entered as {format_money(exp.original_amount, exp.currency)} "
+               f"at 1 {exp.currency} = {exp.exchange_rate:g} {currency}.")
 
 left, right = st.columns(2)
 with left:
@@ -85,7 +96,6 @@ if exp.items:
     for item in exp.items:
         who = ", ".join(names[c] for c in item.consumer_ids)
         st.write(f"- {item.name}: {format_money(item.amount, currency)} → {who}")
-
 
 # ---------------------------------------------------------------------------
 # Edit / delete the selected expense

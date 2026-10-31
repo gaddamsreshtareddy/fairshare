@@ -63,22 +63,22 @@ def show_flash() -> None:
 # Sidebar
 # ---------------------------------------------------------------------------
 def render_sidebar() -> None:
-    """Show the FairShare name and the currently open group in the sidebar."""
+    """Show the currently open group in the sidebar."""
     with st.sidebar:
-        st.markdown("### 💸 FairShare")
+        st.divider()
         group_id = get_current_group_id()
         if group_id is None:
-            st.caption("No group open")
+            st.caption("No group open. Go to Home to create or open one.")
             return
         try:
             with db_session() as conn:
                 group = svc.get_group(conn, group_id)
         except ValidationError:
             set_current_group(None)  # the group no longer exists
-            st.caption("No group open")
+            st.caption("No group open. Go to Home to create or open one.")
             return
-        st.caption("Current group")
-        st.markdown(f"**{group.name}**  \n{group.base_currency}")
+        st.caption("CURRENT GROUP")
+        st.markdown(f"**{group.name}** ({group.base_currency})")
 
 
 # ---------------------------------------------------------------------------
@@ -99,5 +99,5 @@ def require_open_group():
             set_current_group(None)  # the remembered group no longer exists
 
     st.info("No group is open. Go to the Home page to create or open a group.")
-    st.page_link("app.py", label="Go to Home", icon="🏠")
+    st.page_link("home.py", label="Go to Home", icon="🏠")
     st.stop()  # nothing below this line runs
