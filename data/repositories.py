@@ -6,8 +6,7 @@ Rules for this file:
   that is the job of the logic and service layers above.
 - Functions return model objects (Group, Member, ...), never raw rows.
 """
-
-from data.models import Expense, Group, Item, Member, PayerShare, Split
+from data.models import Expense, Group, Item, Member, PayerShare, Settlement, Split
 
 # ---------------------------------------------------------------------------
 # Groups
@@ -254,3 +253,86 @@ def list_expenses(conn, group_id: int) -> list[Expense]:
         )
     ]
     return [get_expense(conn, expense_id) for expense_id in ids]
+
+
+# ---------------------------------------------------------------------------
+# Settlements
+# ---------------------------------------------------------------------------
+def list_settlements(conn, group_id: int) -> list[Settlement]:
+    rows = conn.execute(
+        "SELECT * FROM settlements WHERE group_id = ? ORDER BY id", (group_id,)
+    )
+    return [Settlement.from_row(r) for r in rows]
+
+
+def get_settlement(conn, settlement_id: int) -> Settlement | None:
+    row = conn.execute(
+        "SELECT * FROM settlements WHERE id = ?", (settlement_id,)
+    ).fetchone()
+    return Settlement.from_row(row) if row else None
+
+
+def _log(conn, s_id, group_id, from_id, to_id, amount, event):
+    conn.execute(
+        "INSERT INTO settlement_history "
+        "(group_id, settlement_id, from_member_id, to_member_id, amount, event) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (group_id, s_id, from_id, to_id, amount, event),
+    )
+
+
+def replace_pending_settlements(conn, group_id: int, payments) -> list[Settlement]:
+    """Delete the old Pending plan and save a new one (one transaction)."""
+    try:
+        conn.execute(
+            "DELETE FROM settlements WHERE group_id = ? AND status = 'Pending'",
+            (group_id,),
+        )
+        for from_id, to_id, amount in payments:
+            cur = conn.execute(
+                "INSERT INTO settlements "
+                "(group_id, from_member_id, to_member_id, amount) VALUES (?, ?, ?, ?)",
+                (group_id, from_id, to_id, amount),
+            )
+            _log(conn, cur.lastrowid, group_id, from_id, to_id, amount, "Generated")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return [s for s in list_settlements(conn, group_id) if s.status == "Pending"]
+
+
+def set_settlement_status(conn, settlement_id: int, completed: bool) -> Settlement | None:
+    """Mark a settlement Completed (True) or Pending again (False)."""
+    s = get_settlement(conn, settlement_id)
+    if s is None:
+        return None
+    try:
+        if completed:
+            conn.execute(
+                "UPDATE settlements SET status = 'Completed', "
+                "completed_at = CURRENT_TIMESTAMP WHERE id = ?", (settlement_id,))
+        else:
+            conn.execute(
+                "UPDATE settlements SET status = 'Pending', completed_at = NULL "
+                "WHERE id = ?", (settlement_id,))
+        _log(conn, s.id, s.group_id, s.from_member_id, s.to_member_id, s.amount,
+             "Completed" if completed else "Reopened")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return get_settlement(conn, settlement_id)
+
+
+def list_settlement_history(conn, group_id: int) -> list[dict]:
+    rows = conn.execute(
+        """SELECT h.event_at, h.event, h.amount,
+                  f.name AS from_name, t.name AS to_name
+           FROM settlement_history h
+           JOIN members f ON f.id = h.from_member_id
+           JOIN members t ON t.id = h.to_member_id
+           WHERE h.group_id = ? ORDER BY h.id DESC""",
+        (group_id,),
+    )
+    return [dict(r) for r in rows]
