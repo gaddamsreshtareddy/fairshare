@@ -1,10 +1,12 @@
-"""FairShare: Add Expense page (all four split methods, multiple payers)."""
+"""FairShare: Add Expense page (four split methods, multiple payers, currencies)."""
 
 from datetime import date
+from decimal import Decimal
 
 import streamlit as st
 
 from data.models import format_money, to_minor
+from logic.currency import convert, needs_conversion, parse_rate
 from logic.splitting import (
     custom_split,
     equal_split,
@@ -12,9 +14,10 @@ from logic.splitting import (
     percentage_split,
     validate_payers,
 )
-from logic.validators import CATEGORIES, ValidationError
+from logic.validators import CATEGORIES, SUPPORTED_CURRENCIES, ValidationError
 from services import expense_service as es
 from services import group_service as gs
+from services.rate_service import fetch_rate
 from ui.components import (
     db_session,
     flash,
@@ -39,20 +42,58 @@ if not members:
 
 names = {m.id: m.name for m in members}  # {member_id: name}
 n = st.session_state.get("expense_form_n", 0)  # form counter, used in widget keys
+base = group.base_currency
+
+
+def fill_live_rate(from_cur, to_cur, form_n):
+    """Button callback: put a live rate into the rate box."""
+    try:
+        rate = fetch_rate(from_cur, to_cur)
+        st.session_state[f"rate_{form_n}"] = format(rate.quantize(Decimal("0.000001")), "f")
+        st.session_state["rate_msg"] = (
+            "ok",
+            f"Live rate loaded: 1 {from_cur} = "
+            f"{format(rate.quantize(Decimal('0.0001')), 'f')} {to_cur}",
+        )
+    except ValidationError as error:
+        st.session_state["rate_msg"] = ("warn", str(error))
+
 
 # ---------------------------------------------------------------------------
-# Part 1: basic fields and split method
+# Part 1: basic fields, split method and currency
 # ---------------------------------------------------------------------------
 METHODS = {"Equal": "equal", "Custom": "custom",
            "Percentage": "percentage", "Item-based": "item"}
-currency = group.base_currency
 
 title = st.text_input("Expense title", placeholder="e.g. Dinner", key=f"title_{n}")
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 expense_date = col1.date_input("Date", value=date.today(), key=f"date_{n}")
 category = col2.selectbox("Category", CATEGORIES, key=f"category_{n}")
 method = METHODS[col3.selectbox("Split method", list(METHODS), key=f"method_{n}")]
+currency = col4.selectbox(
+    "Currency", SUPPORTED_CURRENCIES,
+    index=SUPPORTED_CURRENCIES.index(base), key=f"currency_{n}",
+)
+
+rate_text = None
+rate_error = None
+if needs_conversion(currency, base):
+    r1, r2 = st.columns([3, 1])
+    rate_text = r1.text_input(
+        f"Exchange rate: 1 {currency} = ? {base}",
+        placeholder="e.g. 83.25", key=f"rate_{n}",
+    )
+    r2.write("")
+    r2.button("Fetch live rate", on_click=fill_live_rate,
+              args=(currency, base, n), key=f"fetch_{n}")
+    msg = st.session_state.pop("rate_msg", None)
+    if msg:
+        (st.success if msg[0] == "ok" else st.warning)(msg[1])
+    try:
+        parse_rate(rate_text)
+    except ValidationError as error:
+        rate_error = str(error)
 
 st.divider()
 total = 0
@@ -147,7 +188,7 @@ if shares is not None:
             validate_payers(total, payers)
         except ValidationError as error:
             payer_error = str(error)
-ready = shares is not None and payer_error is None
+ready = shares is not None and payer_error is None and rate_error is None
 
 # ---------------------------------------------------------------------------
 # Part 5: preview and Save
@@ -159,10 +200,15 @@ if split_error:
     st.info(split_error)
 elif payer_error:
     st.warning(payer_error)
+if rate_error and shares is not None:
+    st.warning(rate_error)
 
 if shares:
     st.markdown(f"**Expense:** {title.strip() or '(no title yet)'}")
     st.markdown(f"**Total:** {format_money(total, currency)}")
+    if needs_conversion(currency, base) and rate_error is None:
+        st.markdown(f"**In {base}:** about {format_money(convert(total, rate_text), base)} "
+                    f"(rate {rate_text.strip()})")
     st.markdown("**Paid by:**")
     for pid, paid in payers.items():
         st.write(f"- {names[pid]}: {format_money(paid, currency)}")
@@ -182,6 +228,8 @@ if st.button("Save expense", type="primary", disabled=not ready, key=f"save_{n}"
                 shares=shares_in,
                 percentages={p: str(v) for p, v in percents.items()},
                 items=items_data,
+                currency=currency,
+                rate=rate_text,
             )
         flash(f"Expense '{saved.title}' saved.")
         st.session_state["expense_form_n"] = n + 1  # new keys = empty form
