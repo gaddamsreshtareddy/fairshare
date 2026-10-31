@@ -116,3 +116,28 @@ def get_balances(conn, group_id):
     expenses = repo.list_expenses(conn, group_id)
     members = repo.list_members(conn, group_id)
     return calculate_balances(expenses, [m.id for m in members])
+
+
+def update_expense_details(conn, expense_id, title, category, expense_date):
+    """Edit the title, category and date of a saved expense."""
+    get_expense(conn, expense_id)  # raises if it no longer exists
+    clean_title = clean_text(title)
+    if not clean_title:
+        raise ValidationError("Title is required.")
+    if category not in CATEGORIES:
+        raise ValidationError(f"Category must be one of: {', '.join(CATEGORIES)}.")
+    if isinstance(expense_date, date):
+        expense_date = expense_date.isoformat()
+    try:
+        date.fromisoformat(str(expense_date))
+    except ValueError:
+        raise ValidationError("Date is not valid.") from None
+    return repo.update_expense_details(conn, expense_id, clean_title, category,
+                                       str(expense_date))
+
+
+def delete_expense(conn, expense_id):
+    """Delete an expense and clear the now out-of-date pending settlement plan."""
+    expense = get_expense(conn, expense_id)
+    repo.delete_expense(conn, expense_id)
+    repo.replace_pending_settlements(conn, expense.group_id, [])

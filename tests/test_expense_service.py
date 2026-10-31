@@ -296,3 +296,4 @@ def test_repository_rollback_leaves_nothing(conn, setup):
     ).fetchone()[0]
 
     assert count == 0
+

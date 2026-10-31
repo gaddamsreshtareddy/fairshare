@@ -336,3 +336,21 @@ def list_settlement_history(conn, group_id: int) -> list[dict]:
         (group_id,),
     )
     return [dict(r) for r in rows]
+
+
+def update_expense_details(conn, expense_id: int, title: str, category: str,
+                           expense_date: str) -> Expense | None:
+    """Change only the title, category and date. Amounts are untouched."""
+    cur = conn.execute(
+        "UPDATE expenses SET title = ?, category = ?, expense_date = ? WHERE id = ?",
+        (title, category, expense_date, expense_id),
+    )
+    conn.commit()
+    return get_expense(conn, expense_id) if cur.rowcount else None
+
+
+def delete_expense(conn, expense_id: int) -> bool:
+    """Delete an expense. Its payers, splits and items go with it (CASCADE)."""
+    cur = conn.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
+    conn.commit()
+    return cur.rowcount > 0
